@@ -35,14 +35,6 @@ class ApiService {
     return response.json()
   }
 
-  // Create a new transaction from natural language input
-  async createTransaction(input: ExpenseInput): Promise<Transaction[]> {
-    const response = await this.request<Transaction[]>('/transactions', {
-      method: 'POST',
-      body: JSON.stringify(input),
-    })
-    return response.data
-  }
 
   // List transactions with optional filters
   async listTransactions(filters: TransactionFilters = {}): Promise<Transaction[]> {
@@ -64,6 +56,19 @@ class ApiService {
     const response = await this.request<Transaction[]>(endpoint)
     return response.data
   }
+
+  // Create a new transaction from natural language input
+  async createTransaction(payload: {
+    line: string
+    transaction_date?: string
+  }): Promise<Transaction[]> {
+    const response = await this.request<Transaction[]>('/transactions', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+    return response.data
+  }
+
 
   // Get a specific transaction by ID
   async getTransaction(id: number): Promise<Transaction> {

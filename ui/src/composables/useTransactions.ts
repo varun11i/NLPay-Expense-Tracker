@@ -48,12 +48,15 @@ export function useTransactions() {
     }
   }
 
-  const createTransaction = async (description: string) => {
+  const createTransaction = async (description: string, transactionDate?: string) => {
     loading.value = true
     error.value = null
 
     try {
-      const newTransactions = await apiService.createTransaction({ line: description })
+      const newTransactions = await apiService.createTransaction({
+        line: description,
+        transaction_date: transactionDate,
+      })
       transactions.value.unshift(...newTransactions)
       success(`Added ${newTransactions.length} transaction${newTransactions.length > 1 ? 's' : ''}`)
       return newTransactions

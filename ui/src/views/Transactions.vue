@@ -660,17 +660,27 @@ const formatCurrency = (amount: number, currency: string = 'INR') => {
 }
 
 const formatDate = (dateString: string) => {
-  return new Date(dateString).toLocaleDateString()
+  if (!dateString) return ''
+
+  // Handle either "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM:SS..."
+  const isoDate = dateString.slice(0, 10) // just the date part
+  const [year, month, day] = isoDate.split('-')
+
+  // Simple, timezone-safe display as MM/DD/YYYY
+  return `${month}/${day}/${year}`
 }
+
 
 const addExpense = async () => {
   if (!newExpense.value.description.trim()) return
 
   isSubmitting.value = true
   try {
-    // include the selected date in the description so the LLM can parse it
-    const textWithDate = `${newExpense.value.description} (date: ${newExpense.value.transaction_date})`
-    await createTransaction(textWithDate)
+    await createTransaction(
+      newExpense.value.description,
+      newExpense.value.transaction_date
+    )
+
     newExpense.value.description = ''
     newExpense.value.transaction_date = new Date().toISOString().split('T')[0]
     showExpenseModal.value = false

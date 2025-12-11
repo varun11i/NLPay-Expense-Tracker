@@ -13,7 +13,8 @@ import (
 )
 
 type ExpenseInput struct {
-	Line string `json:"line"`
+	Line           string `json:"line"`
+	TransactionDate string `json:"transaction_date,omitempty"`
 }
 
 type Resp struct {
@@ -41,6 +42,8 @@ func handleIndex(c echo.Context) error {
 func handleCreateTransaction(c echo.Context) error {
 	m := c.Get("app").(*App)
 	var input ExpenseInput
+
+	// Bind JSON body into ExpenseInput (expects "line" and optional "transaction_date")
 	if err := c.Bind(&input); err != nil {
 		m.log.Error("Error binding input", "error", err)
 		return c.JSON(http.StatusBadRequest, Resp{
@@ -68,6 +71,7 @@ func handleCreateTransaction(c echo.Context) error {
 		categoryNames = append(categoryNames, cat.Category)
 	}
 
+	// Let the LLM parse the free-text line into structured transactions
 	transactions, err := m.llm.Parse(input.Line, m.currency, categoryNames)
 	if err != nil {
 		var noTxErr *llm.NoValidTransactionError
@@ -83,6 +87,23 @@ func handleCreateTransaction(c echo.Context) error {
 		})
 	}
 
+	// If the client supplied a transaction_date, validate and override the parsed date
+	if input.TransactionDate != "" {
+		// Validate format (YYYY-MM-DD)
+		if _, err := time.Parse("2006-01-02", input.TransactionDate); err != nil {
+			m.log.Error("Invalid transaction_date", "error", err)
+			return c.JSON(http.StatusBadRequest, Resp{
+				Error: "Invalid transaction_date format, use YYYY-MM-DD",
+			})
+		}
+
+		// Apply the same date string to all parsed transactions
+		for i := range transactions.Transactions {
+			transactions.Transactions[i].TransactionDate = input.TransactionDate
+		}
+	}
+
+	// Save to DB
 	savedTransactions, err := m.Save(transactions)
 	if err != nil {
 		m.log.Error("Error saving transactions", "error", err)

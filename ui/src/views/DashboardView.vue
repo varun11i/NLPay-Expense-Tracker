@@ -1,6 +1,6 @@
-<!-- <script setup>
-import { ref, onMounted, computed } from "vue";
-import { Line, Pie } from "vue-chartjs";
+<script setup lang="ts">
+import { ref, computed, onMounted } from "vue"
+import { Line, Pie, Bar } from "vue-chartjs"
 import {
   Chart as ChartJS,
   Title,
@@ -11,7 +11,8 @@ import {
   CategoryScale,
   LinearScale,
   ArcElement,
-} from "chart.js";
+  BarElement,
+} from "chart.js"
 
 ChartJS.register(
   Title,
@@ -21,90 +22,101 @@ ChartJS.register(
   PointElement,
   CategoryScale,
   LinearScale,
-  ArcElement
-);
+  ArcElement,
+  BarElement
+)
 
-const loading = ref(true);
-const error = ref("");
-const transactions = ref([]);
+interface NormalizedTx {
+  date: string
+  amount: number
+  category: string
+}
 
-// Normalize transaction object into { date, amount, category }
-function normalizeTx(tx) {
-  // Date: try several common keys
+// state
+const loading = ref(true)
+const error = ref<string | null>(null)
+const transactions = ref<NormalizedTx[]>([])
+
+// Normalize raw transaction from backend into a consistent shape
+function normalizeTx(tx: any): NormalizedTx {
+  // Prefer backend transaction_date, fallback to other keys
   const rawDate =
+    tx.transaction_date ||
+    tx.transactionDate ||
     tx.date ||
     tx.created_at ||
     tx.createdAt ||
     tx.timestamp ||
     tx.time ||
-    tx.tx_date;
+    tx.tx_date
 
   const date =
-    typeof rawDate === "string" ? rawDate.slice(0, 10) : "Unknown";
+    typeof rawDate === "string" && rawDate.length >= 10
+      ? rawDate.slice(0, 10) // keep as plain YYYY-MM-DD, no timezone magic
+      : "Unknown"
 
-  // Amount: coerce to number if possible
+  // Amount
   const rawAmount =
-    tx.amount ?? tx.value ?? tx.total ?? tx.amount_cents ?? 0;
+    tx.amount ?? tx.value ?? tx.total ?? tx.amount_cents ?? 0
+  const amount = Number(rawAmount) || 0
 
-  const amount = Number(rawAmount) || 0;
-
-  // Category / label
+  // Category: always fall back to a readable string, never undefined
   const category =
-    tx.category || tx.tag || tx.label || tx.type || "Uncategorized";
+    tx.category || tx.tag || tx.label || tx.type || "Uncategorized"
 
-  return { date, amount, category };
+  return { date, amount, category }
 }
 
 // Fetch all transactions from backend
 const fetchTransactions = async () => {
-  loading.value = true;
-  error.value = "";
+  loading.value = true
+  error.value = null
 
   try {
-    const res = await fetch("/api/transactions");
+    const res = await fetch("/api/transactions")
     if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
+      throw new Error(`HTTP ${res.status}`)
     }
 
-    const data = await res.json();
-    console.log("Dashboard /api/transactions data:", data);
+    const data = await res.json()
+    console.log("Dashboard /api/transactions data:", data)
 
-    let items = [];
+    let items: any[] = []
 
     if (Array.isArray(data)) {
-      items = data;
-    } else if (Array.isArray(data.transactions)) {
-      items = data.transactions;
-    } else if (Array.isArray(data.data)) {
-      items = data.data;
+      items = data
+    } else if (Array.isArray((data as any).transactions)) {
+      items = (data as any).transactions
+    } else if (Array.isArray((data as any).data)) {
+      items = (data as any).data
     } else {
-      items = [];
+      items = []
     }
 
-    transactions.value = items.map((tx) => normalizeTx(tx));
+    transactions.value = items.map((tx) => normalizeTx(tx))
   } catch (e) {
-    console.error(e);
-    error.value = "Failed to load transactions.";
-    transactions.value = [];
+    console.error(e)
+    error.value = "Failed to load transactions."
+    transactions.value = []
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 // Line chart: spending over time (sum per date)
 const lineChartData = computed(() => {
   if (!transactions.value.length) {
-    return { labels: [], datasets: [] };
+    return { labels: [], datasets: [] }
   }
 
-  const dateTotals = {};
+  const dateTotals: Record<string, number> = {}
   for (const tx of transactions.value) {
-    const d = tx.date || "Unknown";
-    dateTotals[d] = (dateTotals[d] || 0) + (tx.amount || 0);
+    const d = tx.date || "Unknown"
+    dateTotals[d] = (dateTotals[d] || 0) + (tx.amount || 0)
   }
 
-  const labels = Object.keys(dateTotals).sort();
-  const values = labels.map((d) => dateTotals[d]);
+  const labels = Object.keys(dateTotals).sort()
+  const values = labels.map((d) => dateTotals[d])
 
   return {
     labels,
@@ -116,21 +128,20 @@ const lineChartData = computed(() => {
         tension: 0.2,
         borderWidth: 2,
         pointRadius: 3,
-        // Color styling
         borderColor: "rgba(59, 130, 246, 1)", // blue-500
         pointBackgroundColor: "rgba(59, 130, 246, 1)",
         pointBorderColor: "#ffffff",
         pointHoverRadius: 5,
       },
     ],
-  };
-});
+  }
+})
 
 const lineChartOptions = {
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
-    legend: { position: "top" },
+    legend: { position: "top" as const },
     title: { display: true, text: "Spending over time" },
   },
   scales: {
@@ -138,40 +149,36 @@ const lineChartOptions = {
       beginAtZero: true,
     },
   },
-};
+}
 
 // Pie chart: spending by category
 const pieChartData = computed(() => {
   if (!transactions.value.length) {
-    return { labels: [], datasets: [] };
+    return { labels: [], datasets: [] }
   }
 
-  const catTotals = {};
+  const catTotals: Record<string, number> = {}
   for (const tx of transactions.value) {
-    const cat = tx.category || "Uncategorized";
-    catTotals[cat] = (catTotals[cat] || 0) + (tx.amount || 0);
+    const cat = tx.category || "Uncategorized"
+    catTotals[cat] = (catTotals[cat] || 0) + (tx.amount || 0)
   }
 
-  const labels = Object.keys(catTotals);
-  const values = labels.map((c) => catTotals[c]);
+  const labels = Object.keys(catTotals)
+  const values = labels.map((c) => catTotals[c])
 
-  // Simple fixed palette (loops if there are more categories)
   const baseColors = [
-    "rgba(59, 130, 246, 0.8)",   // blue-500
-    "rgba(16, 185, 129, 0.8)",   // emerald-500
-    "rgba(249, 115, 22, 0.8)",   // orange-500
-    "rgba(244, 63, 94, 0.8)",    // rose-500
-    "rgba(139, 92, 246, 0.8)",   // violet-500
-    "rgba(234, 179, 8, 0.8)",    // yellow-500
-  ];
+    "rgba(59, 130, 246, 0.8)",   // blue
+    "rgba(16, 185, 129, 0.8)",   // emerald
+    "rgba(249, 115, 22, 0.8)",   // orange
+    "rgba(244, 63, 94, 0.8)",    // rose
+    "rgba(139, 92, 246, 0.8)",   // violet
+    "rgba(234, 179, 8, 0.8)",    // yellow
+  ]
 
   const backgroundColors = labels.map(
     (_label, idx) => baseColors[idx % baseColors.length]
-  );
-
-  const borderColors = backgroundColors.map((c) =>
-    c.replace("0.8", "1")
-  );
+  )
+  const borderColors = backgroundColors.map((c) => c.replace("0.8", "1"))
 
   return {
     labels,
@@ -184,25 +191,147 @@ const pieChartData = computed(() => {
         borderWidth: 1,
       },
     ],
-  };
-});
+  }
+})
 
 const pieChartOptions = {
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
-    legend: { position: "bottom" },
+    legend: { position: "bottom" as const },
     title: { display: true, text: "Spending by category" },
   },
-};
-onMounted(fetchTransactions);
+}
+
+// Top 5 highest individual expenses (bar chart)
+const top5ChartData = computed(() => {
+  if (!transactions.value.length) {
+    return { labels: [], datasets: [] }
+  }
+
+  // Sort by amount descending, take top 5
+  const sorted = [...transactions.value].sort(
+    (a, b) => b.amount - a.amount
+  )
+  const top5 = sorted.slice(0, 5)
+
+  // IMPORTANT: category is always defined via normalizeTx
+  const labels = top5.map((tx) => tx.category || "Uncategorized")
+  const values = top5.map((tx) => tx.amount)
+
+  const baseColors = [
+    "rgba(239, 68, 68, 0.8)",   // red
+    "rgba(59, 130, 246, 0.8)",  // blue
+    "rgba(16, 185, 129, 0.8)",  // green
+    "rgba(234, 179, 8, 0.8)",   // yellow
+    "rgba(139, 92, 246, 0.8)",  // violet
+  ]
+  const backgroundColors = top5.map(
+    (_tx, idx) => baseColors[idx % baseColors.length]
+  )
+  const borderColors = backgroundColors.map((c) => c.replace("0.8", "1"))
+
+  return {
+    labels,
+    datasets: [
+      {
+        label: "Amount",
+        data: values,
+        backgroundColor: backgroundColors,
+        borderColor: borderColors,
+        borderWidth: 1,
+      },
+    ],
+  }
+})
+
+const top5ChartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  indexAxis: "y" as const,
+  plugins: {
+    legend: { display: false },
+    title: { display: true, text: "Top 5 highest expenses (by category)" },
+  },
+  scales: {
+    x: { beginAtZero: true },
+  },
+}
+
+// Simple monthly summary: total this month vs previous month
+const monthlySummaryData = computed(() => {
+  if (!transactions.value.length) {
+    return { labels: [], datasets: [] }
+  }
+
+  const now = new Date()
+  const currentMonth = now.getMonth()
+  const currentYear = now.getFullYear()
+
+  const thisMonthKey = `${currentYear}-${String(
+    currentMonth + 1
+  ).padStart(2, "0")}`
+  const lastMonthDate = new Date(currentYear, currentMonth - 1, 1)
+  const lastMonthKey = `${lastMonthDate.getFullYear()}-${String(
+    lastMonthDate.getMonth() + 1
+  ).padStart(2, "0")}`
+
+  const buckets: Record<string, number> = {
+    [thisMonthKey]: 0,
+    [lastMonthKey]: 0,
+  }
+
+  for (const tx of transactions.value) {
+    if (!tx.date || tx.date === "Unknown") continue
+    const monthKey = tx.date.slice(0, 7) // YYYY-MM
+    if (buckets[monthKey] !== undefined) {
+      buckets[monthKey] += tx.amount || 0
+    }
+  }
+
+  const labels = ["Last Month", "This Month"]
+  const values = [buckets[lastMonthKey] || 0, buckets[thisMonthKey] || 0]
+
+  return {
+    labels,
+    datasets: [
+      {
+        label: "Total spending",
+        data: values,
+        backgroundColor: [
+          "rgba(148, 163, 184, 0.8)", // slate
+          "rgba(59, 130, 246, 0.8)",  // blue
+        ],
+        borderColor: [
+          "rgba(148, 163, 184, 1)",
+          "rgba(59, 130, 246, 1)",
+        ],
+        borderWidth: 1,
+      },
+    ],
+  }
+})
+
+const monthlySummaryOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+    title: { display: true, text: "Monthly spending summary" },
+  },
+  scales: {
+    y: { beginAtZero: true },
+  },
+}
+
+onMounted(fetchTransactions)
 </script>
 
 <template>
   <div class="p-6 space-y-6">
     <h1 class="text-2xl font-semibold mb-2">Dashboard</h1>
     <p class="text-sm text-gray-500 mb-4">
-      Overview of your spending patterns across time and categories.
+      Overview of your spending patterns across time, categories, and top expenses.
     </p>
 
     <div v-if="loading" class="text-gray-500">Loading...</div>
@@ -210,222 +339,25 @@ onMounted(fetchTransactions);
     <div v-else-if="!transactions.length" class="text-gray-500">
       No transactions yet. Add a few and come back to see your dashboard.
     </div>
-    <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-6">
-      <div class="h-72 border rounded-lg p-4 shadow-sm bg-white">
+    <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Line chart -->
+      <div class="h-72 border rounded-lg p-4 shadow-sm bg-base-100">
         <Line :data="lineChartData" :options="lineChartOptions" />
       </div>
 
-      <div class="h-72 border rounded-lg p-4 shadow-sm bg-white">
+      <!-- Pie chart -->
+      <div class="h-72 border rounded-lg p-4 shadow-sm bg-base-100">
         <Pie :data="pieChartData" :options="pieChartOptions" />
       </div>
-    </div>
-  </div>
-  
-</template> -->
 
-<script setup>
-import { ref, onMounted, computed } from "vue";
-import { Line, Pie, Bar } from "vue-chartjs";
-import {
-  Chart as ChartJS,
-  Title,
-  Tooltip,
-  Legend,
-  LineElement,
-  PointElement,
-  CategoryScale,
-  LinearScale,
-  ArcElement,
-  BarElement,
-  Filler,
-} from "chart.js";
-
-ChartJS.register(
-  Title,
-  Tooltip,
-  Legend,
-  LineElement,
-  PointElement,
-  CategoryScale,
-  LinearScale,
-  ArcElement,
-  BarElement,
-  Filler
-);
-
-const loading = ref(true);
-const error = ref("");
-const transactions = ref([]);
-
-function normalizeTx(tx) {
-  const rawDate = tx.date || tx.created_at || tx.tx_date || tx.transaction_date;
-  const date = typeof rawDate === "string" ? rawDate.slice(0, 10) : "Unknown";
-  const amount = Number(tx.amount ?? tx.value ?? 0) || 0;
-  const category = tx.category || "Uncategorized";
-  const description = tx.description || tx.desc || "Expense";
-  return { date, amount, category, description };
-}
-
-// --- FIXED FETCH: Hardcoded Strings to Force Data ---
-const fetchTransactions = async () => {
-  loading.value = true;
-  error.value = "";
-
-  try {
-    const params = new URLSearchParams({
-      start_date: "2020-01-01",
-      end_date: "2030-01-01",
-    });
-
-    const res = await fetch(`/api/transactions?${params.toString()}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const data = await res.json();
-    let items = Array.isArray(data) ? data : (data.data || []);
-    
-    transactions.value = items.map(normalizeTx);
-  } catch (e) {
-    console.error(e);
-    error.value = "Failed to load transactions.";
-  } finally {
-    loading.value = false;
-  }
-};
-
-// --- CHART DATA GENERATION ---
-const lineChartData = computed(() => {
-  const dateTotals = {};
-  transactions.value.forEach(tx => dateTotals[tx.date] = (dateTotals[tx.date] || 0) + tx.amount);
-  const labels = Object.keys(dateTotals).sort();
-  return {
-    labels,
-    datasets: [{
-      label: "Daily Spending",
-      data: labels.map(d => dateTotals[d]),
-      borderColor: "#3b82f6",
-      tension: 0.2,
-      pointRadius: 3
-    }]
-  };
-});
-
-const pieChartData = computed(() => {
-  const catTotals = {};
-  transactions.value.forEach(tx => catTotals[tx.category] = (catTotals[tx.category] || 0) + tx.amount);
-  const labels = Object.keys(catTotals);
-  const colors = ["#3b82f6", "#10b981", "#f97316", "#f43f5e", "#8b5cf6"];
-  return {
-    labels,
-    datasets: [{
-      data: labels.map(c => catTotals[c]),
-      backgroundColor: labels.map((_, i) => colors[i % colors.length])
-    }]
-  };
-});
-
-const topExpensesData = computed(() => {
-  const sorted = [...transactions.value].sort((a, b) => b.amount - a.amount).slice(0, 5);
-  return {
-    labels: sorted.map(t => `${t.description} (${t.date})`),
-    datasets: [{
-      label: "Amount",
-      data: sorted.map(t => t.amount),
-      backgroundColor: "#ef4444",
-      borderRadius: 4,
-      barThickness: 20,
-    }]
-  };
-});
-
-const dayOfWeekData = computed(() => {
-  const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  const dayTotals = new Array(7).fill(0);
-
-  transactions.value.forEach(tx => {
-    if (tx.date === "Unknown") return;
-    const dateObj = new Date(tx.date);
-    const dayIndex = dateObj.getDay(); 
-    if (!isNaN(dayIndex)) {
-      dayTotals[dayIndex] += tx.amount;
-    }
-  });
-
-  return {
-    labels: days,
-    datasets: [{
-      label: "Total Spending",
-      data: dayTotals,
-      backgroundColor: "#8b5cf6",
-      borderRadius: 4
-    }]
-  };
-});
-
-// --- CHART OPTIONS (Crucial for containment) ---
-const commonOptions = { 
-  responsive: true, 
-  maintainAspectRatio: false, // Allows chart to fill the container height
-  plugins: { legend: { position: 'bottom' } }
-};
-
-const horizontalOptions = {
-  ...commonOptions,
-  indexAxis: 'y',
-  plugins: { legend: { display: false } }
-};
-
-onMounted(fetchTransactions);
-</script>
-
-<template>
-  <div class="p-6 space-y-8 pb-20">
-    <div class="flex justify-between items-center">
-      <div>
-        <h1 class="text-2xl font-bold">Dashboard</h1>
-        <p class="text-sm text-gray-500">Overview of your spending habits</p>
-      </div>
-      <button @click="fetchTransactions" class="px-3 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 text-sm">
-        Refresh Data
-      </button>
-    </div>
-
-    <div v-if="loading" class="text-gray-500">Loading charts...</div>
-    <div v-else-if="error" class="text-red-500">{{ error }}</div>
-    
-    <div v-else class="space-y-8">
-      
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div class="h-80 border rounded bg-white p-4 shadow-sm flex flex-col">
-           <h3 class="font-semibold text-gray-700 mb-2 shrink-0">Daily Trend</h3>
-           <div class="flex-1 min-h-0 relative">
-             <Line :data="lineChartData" :options="commonOptions" />
-           </div>
-        </div>
-        
-        <div class="h-80 border rounded bg-white p-4 shadow-sm flex flex-col">
-           <h3 class="font-semibold text-gray-700 mb-2 shrink-0">Categories</h3>
-           <div class="flex-1 min-h-0 relative">
-             <Pie :data="pieChartData" :options="commonOptions" />
-           </div>
-        </div>
+      <!-- Top 5 highest expenses -->
+      <div class="h-72 border rounded-lg p-4 shadow-sm bg-base-100">
+        <Bar :data="top5ChartData" :options="top5ChartOptions" />
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        
-        <div class="h-80 border rounded bg-white p-4 shadow-sm flex flex-col">
-           <h3 class="font-semibold text-gray-700 mb-2 shrink-0">Top 5 Highest Expenses</h3>
-           <div class="flex-1 min-h-0 relative">
-             <Bar :data="topExpensesData" :options="horizontalOptions" />
-           </div>
-        </div>
-
-        <div class="h-80 border rounded bg-white p-4 shadow-sm flex flex-col">
-           <h3 class="font-semibold text-gray-700 mb-2 shrink-0">Spending by Day of Week</h3>
-           <div class="flex-1 min-h-0 relative">
-             <Bar :data="dayOfWeekData" :options="commonOptions" />
-           </div>
-        </div>
-
+      <!-- Monthly summary -->
+      <div class="h-72 border rounded-lg p-4 shadow-sm bg-base-100">
+        <Bar :data="monthlySummaryData" :options="monthlySummaryOptions" />
       </div>
     </div>
   </div>
